@@ -1,1 +1,32 @@
-<ckeditor [editor]="Editor" [config]="config" data="<p>Hello, world!</p>"></ckeditor>
+<div class="editor-layout">
+  <aside class="left-panel">
+    <div class="panel-header"><h3>Thuộc tính khách hàng</h3></div>
+
+    <div class="prop-list" *ngIf="!isLoadingLeft; else leftLoading">
+      <div class="prop-item"
+           *ngFor="let p of properties"
+           cdkDrag
+           [cdkDragData]="p"
+           title="{{p.description || p.name}}"
+           (click)="onClickProperty(p)">
+        <span class="prop-chip">{{ p.name }}</span>
+        <span class="prop-code">{{'{{'+p.code+'}}'}}</span>
+      </div>
+    </div>
+    <ng-template #leftLoading><div class="skeleton">Đang tải thuộc tính...</div></ng-template>
+  </aside>
+
+  <section class="right-panel">
+    <div class="panel-header"><h3>{{ template?.name || 'Template' }}</h3></div>
+
+    <div class="drop-editor" cdkDropList (cdkDropListDropped)="onDroppedToEditor($event)">
+      <ckeditor [data]="content" (ready)="onEditorReady($event)"
+	 	*ngIf="( Editor && config )" [editor]="Editor" [config]="config" 
+	  ></ckeditor>
+    </div>
+
+    <div class="footer-actions">
+      <small *ngIf="isLoadingRight">Đang tải template...</small>
+    </div>
+  </section>
+</div>

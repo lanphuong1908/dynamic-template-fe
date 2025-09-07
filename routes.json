@@ -1,0 +1,4 @@
+{
+  "/client-api/v1/customers/properties": "/properties",
+  "/client-api/v1/templates/:id": "/templates/:id"
+}

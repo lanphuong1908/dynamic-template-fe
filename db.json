@@ -1,0 +1,10 @@
+{
+  "properties": [
+    { "id": "1", "code": "fullName", "name": "Họ tên" },
+    { "id": "2", "code": "email", "name": "Email" },
+    { "id": "3", "code": "dob", "name": "Ngày sinh" }
+  ],
+  "templates": [
+    { "id": "1", "name": "Welcome Template", "content": "<p>Xin chào {{fullName}}, email: {{email}}</p>" }
+  ]
+}
