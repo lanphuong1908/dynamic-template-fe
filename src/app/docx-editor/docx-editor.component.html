@@ -1,0 +1,19 @@
+<div class="sidebar" cdkDropList #sourceList="cdkDropList" [cdkDropListConnectedTo]="[targetList]">
+  <!-- Item text -->
+  <div class="drag-item" *ngFor="let p of properties" cdkDrag [cdkDragData]="{type: 'text', content: 'Nội dung text kéo thả'}">
+    {{ p.code }}
+  </div>
+  <!-- Item image -->
+  <!-- <div class="drag-item" cdkDrag [cdkDragData]="{type: 'image', src: 'https://via.placeholder.com/150'}">
+    Kéo hình ảnh này
+  </div> -->
+  <button style="float: both; margin: 10px;" (click)="saveDocument()">Save Document</button>
+</div>
+
+<div class="editor-container" 
+     cdkDropList
+     #targetList="cdkDropList"
+     [cdkDropListConnectedTo]="[sourceList]"
+     (cdkDropListDropped)="onDropToEditor($event)">
+  <iframe #onlyofficeFrame id="onlyofficeFrame" width="100%" height="600px" frameborder="0" allow="drag-drop"></iframe>
+</div>
