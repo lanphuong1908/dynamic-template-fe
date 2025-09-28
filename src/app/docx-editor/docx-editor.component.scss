@@ -38,3 +38,22 @@
     pointer-events: none;
   }
 }
+
+
+iframe {
+  pointer-events: auto !important;
+  z-index: 1;
+}
+
+.cdk-drag-preview {
+  z-index: 1000;
+}
+
+.cdk-drag-placeholder {
+  opacity: 0;
+}
+
+
+b {
+  z-index: 1000;
+}

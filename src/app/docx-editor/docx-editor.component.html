@@ -8,12 +8,30 @@
     Kéo hình ảnh này
   </div> -->
   <button style="float: both; margin: 10px;" (click)="saveDocument()">Save Document</button>
+  <b cdkDrag [cdkDragData]="{type: 'text', content: '<b>Văn bản in đậm</b>'}">
+    Văn bản in đậm
+  </b>
 </div>
+
+<!-- <div class="editor-container" 
+     cdkDropList
+     #targetList="cdkDropList"
+     [cdkDropListConnectedTo]="[sourceList]"
+     (cdkDropListDropped)="onDropToEditor($event)">
+  <iframe #onlyofficeFrame id="onlyofficeFrame" width="100%" height="600px" frameborder="0" allow="drag-drop" dropzone="copy"></iframe>
+</div> -->
 
 <div class="editor-container" 
      cdkDropList
      #targetList="cdkDropList"
      [cdkDropListConnectedTo]="[sourceList]"
      (cdkDropListDropped)="onDropToEditor($event)">
-  <iframe #onlyofficeFrame id="onlyofficeFrame" width="100%" height="600px" frameborder="0" allow="drag-drop"></iframe>
+  <iframe #onlyofficeFrame 
+          id="onlyofficeFrame" 
+          width="100%" 
+          height="600px" 
+          frameborder="0"
+          [style.pointer-events]="'auto'"
+          allow="drag-drop">
+  </iframe>
 </div>
