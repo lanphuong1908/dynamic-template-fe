@@ -7,3 +7,6 @@ ng s
 3) run service get resource
 cd s3-demo
 npx http-server ./docs -p 3000 --cors
+
+4) link web
+http://localhost:4200/docx-editor
