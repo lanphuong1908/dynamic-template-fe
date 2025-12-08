@@ -14,11 +14,21 @@ import { existsSync } from 'node:fs';
 const serverDistFolder = dirname(fileURLToPath(import.meta.url));
 const browserDistFolder = resolve(serverDistFolder, '../browser');
 const uploadsFolder = resolve(serverDistFolder, '../uploads');
-const publicFolder = resolve(serverDistFolder, '../../public');
+// Fix: Resolve public folder from project root, not from dist folder
+// serverDistFolder is at dist/dynamic-template-fe/server
+// We need to go up to project root: ../../../
+const projectRoot = resolve(serverDistFolder, '../../../');
+const publicFolder = resolve(projectRoot, 'public');
 
-// Đảm bảo thư mục uploads tồn tại
+// Đảm bảo thư mục uploads tồn tại - await during initialization
+let uploadsFolderReady: Promise<string | undefined>;
 if (!existsSync(uploadsFolder)) {
-  mkdir(uploadsFolder, { recursive: true }).catch(console.error);
+  uploadsFolderReady = mkdir(uploadsFolder, { recursive: true }).catch((error) => {
+    console.error('Failed to create uploads folder:', error);
+    throw error;
+  });
+} else {
+  uploadsFolderReady = Promise.resolve(undefined);
 }
 
 const app = express();
@@ -79,7 +89,22 @@ app.use('/sample-docs', express.static(publicFolder, {
  * Document Server không cho phép truy cập private IP, nên cần proxy qua public URL
  */
 app.get('/api/proxy-document/:filename', async (req, res) => {
-  const filename = req.params.filename;
+  let filename = req.params.filename;
+  
+  // Security: Prevent path traversal attacks
+  // Remove any path traversal sequences and normalize the path
+  filename = filename.replace(/\.\./g, '').replace(/[\/\\]/g, '');
+  
+  // Additional validation: ensure filename is safe
+  if (!filename || filename.length === 0 || filename.includes('..')) {
+    return res.status(400).json({ error: 'Invalid filename' });
+  }
+  
+  // Only allow alphanumeric, dots, hyphens, and underscores
+  if (!/^[a-zA-Z0-9._-]+$/.test(filename)) {
+    return res.status(400).json({ error: 'Invalid filename characters' });
+  }
+  
   const httpServerUrl = `http://localhost:3000/${filename}`;
   
   try {
@@ -113,8 +138,18 @@ app.post('/api/upload-document', upload.single('file'), async (req, res) => {
   }
 
   try {
-    const fileName = `${Date.now()}-${req.file.originalname}`;
+    // Ensure uploads folder exists before writing
+    await uploadsFolderReady;
+    
+    // Sanitize filename to prevent path traversal
+    const sanitizedOriginalName = req.file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const fileName = `${Date.now()}-${sanitizedOriginalName}`;
     const filePath = resolve(uploadsFolder, fileName);
+    
+    // Additional security: ensure the resolved path is within uploadsFolder
+    if (!filePath.startsWith(uploadsFolder)) {
+      return res.status(400).json({ error: 'Invalid file path' });
+    }
     
     await writeFile(filePath, req.file.buffer);
     
@@ -124,6 +159,49 @@ app.post('/api/upload-document', upload.single('file'), async (req, res) => {
   } catch (error) {
     console.error('Upload error:', error);
     return res.status(500).json({ error: 'Failed to upload file' });
+  }
+});
+
+/**
+ * Callback endpoint for ONLYOFFICE to save document
+ */
+app.post('/api/save-document', async (req, res) => {
+  try {
+    console.log('Save document callback received');
+    console.log('Request body:', req.body);
+    console.log('Request headers:', req.headers);
+    
+    // ONLYOFFICE sẽ gửi file data qua body
+    const fileData = req.body;
+    
+    if (!fileData || !fileData.url) {
+      console.error('No file data in callback');
+      return res.status(400).json({ error: 'No file data' });
+    }
+
+    // Download file từ ONLYOFFICE
+    const response = await fetch(fileData.url);
+    if (!response.ok) {
+      return res.status(500).json({ error: 'Failed to download file from ONLYOFFICE' });
+    }
+
+    const buffer = await response.arrayBuffer();
+    const fileName = `downloaded-${Date.now()}.${fileData.filetype || 'docx'}`;
+    const filePath = resolve(uploadsFolder, fileName);
+    
+    await writeFile(filePath, Buffer.from(buffer));
+    
+    console.log('File saved:', fileName);
+    
+    // Trả về URL để download
+    return res.json({ 
+      success: true, 
+      url: `/uploads/${fileName}`,
+      fileName: fileName
+    });
+  } catch (error) {
+    console.error('Save document callback error:', error);
+    return res.status(500).json({ error: 'Failed to save document' });
   }
 });
 

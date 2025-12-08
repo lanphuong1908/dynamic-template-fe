@@ -1,16 +1,18 @@
 import { Component, AfterViewInit, ViewChild, ElementRef, OnInit, inject, PLATFORM_ID } from '@angular/core';
 import { CdkDragDrop, DragDropModule, moveItemInArray } from '@angular/cdk/drag-drop';
 import { CommonModule, isPlatformBrowser } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { PropertiesService } from '../core/services/properties.service';
 import { CustomerProperty } from '../core/models/property.model';
+import { environment } from '../../environments/environment';
 
 declare const DocsAPI: any; // từ script api.js
 
 @Component({
   selector: 'app-docx-editor',
   standalone: true,
-  imports: [DragDropModule, CommonModule],
+  imports: [DragDropModule, CommonModule, FormsModule],
   templateUrl: './docx-editor.component.html',
   styleUrl: './docx-editor.component.scss'
 })
@@ -20,10 +22,20 @@ export class DocxEditorComponent implements OnInit {
   private docEditor: any;
 
   properties: CustomerProperty[] = [];
+  filteredProperties: CustomerProperty[] = [];
   isLoadingLeft = false;
   selectedFileName: string | null = null;
   currentDocumentUrl: string | null = null;
   private fileCache: Map<string, string> = new Map(); // Cache file URLs
+  private blobUrls: Set<string> = new Set(); // Track blob URLs for cleanup
+  
+  // Document type selection
+  documentType: 'word' | 'cell' = 'word'; // 'word' cho Word, 'cell' cho Excel
+  currentFileType: string = 'docx'; // 'docx' hoặc 'xlsx'
+  
+  // Search and filter
+  searchText: string = '';
+  selectedProperty: string | null = null;
 
   constructor(
 		private propsSvc: PropertiesService,
@@ -46,6 +58,7 @@ export class DocxEditorComponent implements OnInit {
         next: res => {
             console.log('API Response:', res); // Thêm log này
             this.properties = res;
+            this.filteredProperties = res; // Initialize filtered list
         },
         error: (err) => {
             console.error('API Error:', err);  // Thêm log lỗi
@@ -67,21 +80,44 @@ export class DocxEditorComponent implements OnInit {
     }
 
     // Kiểm tra xem script tag đã tồn tại chưa
-    const existingScript = document.querySelector('script[src*="api.js"]');
+    const existingScript = document.querySelector('script[src*="api.js"]') as HTMLScriptElement;
     if (existingScript) {
-      console.log('ONLYOFFICE script tag already exists, waiting for load...');
-      existingScript.addEventListener('load', () => {
+      console.log('ONLYOFFICE script tag already exists');
+      // Check if script is already loaded by checking if DocsAPI is available
+      // If not, check if script has onload handler (indicates it might be loading)
+      const hasLoadHandler = existingScript.onload !== null;
+      
+      if (typeof DocsAPI !== 'undefined') {
+        // Script already loaded and DocsAPI is available
         this.initOnlyOffice();
-      });
+      } else if (!hasLoadHandler) {
+        // Script might be loading or already loaded but DocsAPI not ready yet
+        // Wait a bit and check again
+        setTimeout(() => {
+          if (typeof DocsAPI !== 'undefined') {
+            this.initOnlyOffice();
+          } else {
+            // If still not available, add listener (script might still be loading)
+            existingScript.addEventListener('load', () => {
+              this.initOnlyOffice();
+            });
+          }
+        }, 100);
+      } else {
+        // Script is loading, add listener
+        existingScript.addEventListener('load', () => {
+          this.initOnlyOffice();
+        });
+      }
       return;
     }
 
     const script = document.createElement('script');
-    // ONLYOFFICE Document Server đang chạy trên port 8080
-    script.src = 'http://localhost:8080/web-apps/apps/api/documents/api.js';
+    // ONLYOFFICE Document Server URL from environment
+    script.src = `${environment.onlyofficeServerUrl}/web-apps/apps/api/documents/api.js`;
     script.async = true;
     script.id = 'onlyoffice-api-script';
-    
+
     script.onload = () => {
       console.log('ONLYOFFICE script loaded successfully');
       this.initOnlyOffice();
@@ -97,52 +133,92 @@ export class DocxEditorComponent implements OnInit {
     document.body.appendChild(script);
   }
 
-  initOnlyOffice(documentUrl?: string, fileName?: string): void {
+  selectDocumentType(type: 'word' | 'cell'): void {
+    if (this.documentType === type) return; // Đã chọn rồi thì không làm gì
+    
+    console.log('Changing document type from', this.documentType, 'to', type);
+    
+    this.documentType = type;
+    this.currentFileType = type === 'word' ? 'docx' : 'xlsx';
+    this.selectedFileName = null;
+    this.currentDocumentUrl = null;
+    
+    console.log('Document type changed to:', type);
+    console.log('Current file type:', this.currentFileType);
+    
+    // Tạo document mới với loại đã chọn
+    this.createNewDocument();
+  }
+
+  createNewDocument(): void {
+    // Tạo document mới dựa trên loại đã chọn - sử dụng file sample có sẵn
+    const fileName = this.documentType === 'word' ? 'sample.docx' : 'sample.xlsx';
+    const fileType = this.currentFileType;
+    
+    // Sử dụng file sample từ Document Server (đã copy vào container)
+    const sampleDocUrl = `http://localhost/web-apps/${fileName}`;
+    
+    console.log('Creating new document:', fileName, 'Type:', this.documentType);
+    console.log('Loading from URL:', sampleDocUrl);
+    
+    this.loadDocument(sampleDocUrl, fileName, fileType);
+  }
+
+  initOnlyOffice(documentUrl?: string, fileName?: string, fileType?: string): void {
     // Sử dụng documentUrl được truyền vào hoặc URL mặc định
     // Document Server chạy trong Docker nên cần URL có thể truy cập được từ container
     // Thử nhiều cách: IP thực, host.docker.internal, hoặc endpoint proxy
     let defaultUrl = documentUrl || this.currentDocumentUrl;
     
+    // Xác định fileType và documentType
+    const docFileType = fileType || this.currentFileType;
+    const docDocumentType = this.documentType;
+    
     if (!defaultUrl) {
       // Sử dụng file từ Document Server container (đã copy vào /var/www/onlyoffice/documentserver/web-apps/)
       // File được serve qua nginx của Document Server (port 80 bên trong container)
       // Document Server sẽ tải file từ chính nó, tránh vấn đề private IP
-      defaultUrl = 'http://localhost/web-apps/sample.docx';
+      const defaultFileName = docFileType === 'docx' || docFileType === 'doc' ? 'sample.docx' : 'sample.xlsx';
+      defaultUrl = `http://localhost/web-apps/${defaultFileName}`;
       console.log('Using file from Document Server:', defaultUrl);
     }
     
     // Nếu URL chứa IP private (192.168.x.x, 10.x.x.x, 172.x.x.x), Document Server sẽ chặn
     // Thay thế bằng URL từ Document Server (localhost port 80)
     if (defaultUrl.includes('192.168.') || defaultUrl.includes('10.') || defaultUrl.includes('172.16.')) {
-      const filename = defaultUrl.split('/').pop() || 'sample.docx';
+      const filename = defaultUrl.split('/').pop() || (docFileType === 'docx' ? 'sample.docx' : 'sample.xlsx');
       defaultUrl = `http://localhost/web-apps/${filename}`;
       console.log('Replaced private IP URL with Document Server URL:', defaultUrl);
     }
     
-    const docTitle = fileName || 'sample.docx';
+    const docTitle = fileName || (docFileType === 'docx' ? 'sample.docx' : 'sample.xlsx');
     
     console.log('Loading document from URL:', defaultUrl);
-    console.log('Make sure http-server is running on port 3000 and accessible from Docker container');
+    console.log('Document type:', docDocumentType, 'File type:', docFileType);
     
     const config = {
       document: {
-        fileType: 'docx',
+        fileType: docFileType,
         title: docTitle,
         url: defaultUrl,
         key: 'doc-' + new Date().getTime(), // Key duy nhất để tránh cache
         permissions: {
           edit: true,
-          download: true
-        }
+          download: true,
+          print: true
+        },
+        // Thêm callback URL để nhận file sau khi save (chỉ khi có server)
+        // callbackUrl: window.location.origin + '/api/save-document'
       },
-      documentType: 'word', // Sửa từ 'text' thành 'word'
+      documentType: docDocumentType, // 'word' hoặc 'cell'
       editorConfig: {
         mode: 'edit',
         user: { id: 'u1', name: 'Guest User' },
         customization: {
           autosave: false,
           hideRightMenu: false,
-          toolbarNoTabs: false
+          toolbarNoTabs: false,
+          hideDownload: false // Đảm bảo nút download hiển thị
         }
         // Loại bỏ plugins config vì URL không hợp lệ
       },
@@ -153,19 +229,57 @@ export class DocxEditorComponent implements OnInit {
           console.log('Editor ready');
           // Lưu reference đến editor để sử dụng sau
           console.log('DocEditor instance:', this.docEditor);
+          console.log('DocEditor methods:', Object.keys(this.docEditor || {}));
+          
+          // Kiểm tra iframe sau khi editor ready
+          setTimeout(() => {
+            const iframe = document.getElementById('onlyofficeFrame');
+            console.log('Iframe after ready:', !!iframe, iframe?.id);
+          }, 1000);
         },
         onRequestSaveAs: (event: any) => {
           console.log('SaveAs requested', event);
-          // Lấy dữ liệu file
-          const downloadUrl = event.data;
+          console.log('Event data:', event.data);
+          console.log('Event type:', typeof event.data);
+          
+          // Lấy dữ liệu file - có thể là URL hoặc base64
+          const downloadData = event.data;
+          
+          if (!downloadData) {
+            console.error('No download data in event');
+            alert('Không có dữ liệu để download. Vui lòng thử lại.');
+            return;
+          }
 
-          // Tạo link download
-          const link = document.createElement('a');
-          link.href = downloadUrl;
-          link.download = 'edited-document.docx';
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
+          try {
+            // Tạo link download với tên file phù hợp
+            const link = document.createElement('a');
+            link.href = downloadData;
+            const extension = this.documentType === 'word' ? 'docx' : 'xlsx';
+            const fileName = this.selectedFileName 
+              ? this.selectedFileName.replace(/\.[^.]+$/, '') + '-edited.' + extension
+              : `edited-document.${extension}`;
+            link.download = fileName;
+            
+            console.log('Downloading file:', fileName);
+            console.log('Download URL:', downloadData);
+            
+            document.body.appendChild(link);
+            link.click();
+            
+            // Đợi một chút trước khi remove
+            setTimeout(() => {
+              if (document.body.contains(link)) {
+                document.body.removeChild(link);
+              }
+            }, 100);
+          } catch (error) {
+            console.error('Error creating download link:', error);
+            alert('Lỗi khi tạo link download. Vui lòng thử lại.');
+          }
+        },
+        onDocumentStateChange: (event: any) => {
+          console.log('Document state changed:', event.data);
         },
         onError: (event: any) => {
           console.error('Editor error:', event.data);
@@ -188,8 +302,9 @@ export class DocxEditorComponent implements OnInit {
   setupPostMessageListener(): void {
     if (!isPlatformBrowser(this.platformId)) return;
 
+    const onlyofficeOrigin = new URL(environment.onlyofficeServerUrl).origin;
     window.addEventListener('message', (event) => {
-      if (event.origin !== 'http://localhost:8080') return; // ONLYOFFICE Document Server trên port 8080
+      if (event.origin !== onlyofficeOrigin) return;
       console.log('From iframe:', event.data);
     });
   }
@@ -200,8 +315,46 @@ export class DocxEditorComponent implements OnInit {
 
   onItemClick(property: any): void {
     console.log('Item clicked:', property);
+    // Highlight selected property
+    this.selectedProperty = property.code;
+    setTimeout(() => {
+      this.selectedProperty = null;
+    }, 500);
     // Chèn text vào document khi click
     this.insertTextToDocument(property.code);
+  }
+
+  filterProperties(): void {
+    if (!this.searchText || this.searchText.trim() === '') {
+      this.filteredProperties = this.properties;
+      return;
+    }
+    
+    const searchLower = this.searchText.toLowerCase().trim();
+    this.filteredProperties = this.properties.filter(p => 
+      p.code.toLowerCase().includes(searchLower) ||
+      (p.name && p.name.toLowerCase().includes(searchLower)) ||
+      (p.description && p.description.toLowerCase().includes(searchLower))
+    );
+  }
+
+  clearSearch(): void {
+    this.searchText = '';
+    this.filterProperties();
+  }
+
+  onItemHover(event: MouseEvent, isEntering: boolean): void {
+    const target = event.currentTarget as HTMLElement;
+    if (target) {
+      target.style.background = isEntering ? '#e0e0e0' : '#f5f5f5';
+    }
+  }
+
+  onButtonHover(event: MouseEvent, color: string): void {
+    const target = event.currentTarget as HTMLElement;
+    if (target) {
+      target.style.background = color;
+    }
   }
 
   onDropToEditor(event: CdkDragDrop<any>) {
@@ -247,6 +400,8 @@ export class DocxEditorComponent implements OnInit {
   sendToIframe(data: any): void {
     console.log('Sending to iframe:', data);
     
+    const onlyofficeOrigin = new URL(environment.onlyofficeServerUrl).origin;
+    
     // Tìm iframe của ONLYOFFICE
     const iframe = document.querySelector('iframe[name="frameEditor"]') as HTMLIFrameElement;
     
@@ -257,7 +412,7 @@ export class DocxEditorComponent implements OnInit {
           type: 'insertItem',
           data: data
         },
-        'http://localhost:8080'
+        onlyofficeOrigin
       );
     } else if (this.onlyofficeFrame?.nativeElement?.contentWindow) {
       console.log('Using ViewChild iframe');
@@ -266,7 +421,7 @@ export class DocxEditorComponent implements OnInit {
           type: 'insertItem',
           data: data
         },
-        'http://localhost:8080'
+        onlyofficeOrigin
       );
     } else {
       console.error('Iframe contentWindow not available');
@@ -275,23 +430,236 @@ export class DocxEditorComponent implements OnInit {
   }
 
   saveDocument(): void {
-    if (this.docEditor) {
-      // Download as DOCX (giữ nguyên format)
-      this.docEditor.downloadAs('docx');
-      console.log('Downloading as DOCX...');
-    } else {
+    console.log('Save document clicked');
+    
+    if (!this.docEditor) {
+      console.warn('Editor not ready');
       alert('Editor chưa sẵn sàng. Vui lòng đợi document load xong.');
+      return;
+    }
+
+    try {
+      // Download với format tương ứng (docx hoặc xlsx)
+      const format = this.documentType === 'word' ? 'docx' : 'xlsx';
+      console.log('Downloading as', format.toUpperCase(), '...');
+      console.log('DocEditor instance:', this.docEditor);
+      console.log('Document type:', this.documentType);
+      
+      // Thử trigger download từ toolbar của ONLYOFFICE
+      this.triggerDownloadFromToolbar(format);
+    } catch (error) {
+      console.error('Error downloading document:', error);
+      alert('Lỗi khi download. Vui lòng thử lại hoặc sử dụng nút Download trong toolbar của editor.');
     }
   }
 
-  downloadAsPdf(): void {
-    if (this.docEditor) {
-      // Download as PDF
-      this.docEditor.downloadAs('pdf');
-      console.log('Downloading as PDF...');
-    } else {
-      alert('Editor chưa sẵn sàng. Vui lòng đợi document load xong.');
+  triggerDownloadFromToolbar(format: string): void {
+    console.log('Triggering download, format:', format);
+    
+    // Đợi một chút để đảm bảo iframe đã load
+    this.waitForIframeAndDownload(format, 0);
+  }
+
+  waitForIframeAndDownload(format: string, attempt: number): void {
+    const maxAttempts = 10;
+    
+    if (attempt >= maxAttempts) {
+      console.error('Iframe not ready after', maxAttempts, 'attempts');
+      alert('Editor chưa sẵn sàng. Vui lòng đợi document load xong và thử lại.');
+      return;
     }
+    
+    // Tìm iframe của ONLYOFFICE - thử nhiều cách
+    let targetIframe: HTMLIFrameElement | null = null;
+    
+    // Cách 1: Tìm bằng ID
+    targetIframe = document.getElementById('onlyofficeFrame') as HTMLIFrameElement;
+    
+    // Cách 2: Tìm bằng ViewChild
+    if (!targetIframe && this.onlyofficeFrame?.nativeElement) {
+      targetIframe = this.onlyofficeFrame.nativeElement;
+    }
+    
+    // Cách 3: Tìm bằng querySelector
+    if (!targetIframe) {
+      targetIframe = document.querySelector('iframe#onlyofficeFrame') as HTMLIFrameElement;
+    }
+    
+    // Cách 4: Tìm bất kỳ iframe nào chứa ONLYOFFICE
+    if (!targetIframe) {
+      const onlyofficeOrigin = new URL(environment.onlyofficeServerUrl).origin;
+      const allIframes = document.querySelectorAll('iframe');
+      for (let i = 0; i < allIframes.length; i++) {
+        const iframe = allIframes[i];
+        if (iframe.src && (iframe.src.includes(onlyofficeOrigin) || iframe.src.includes('onlyoffice'))) {
+          targetIframe = iframe;
+          break;
+        }
+      }
+    }
+    
+    if (!targetIframe) {
+      console.log('Iframe not found, retrying... attempt', attempt + 1);
+      setTimeout(() => this.waitForIframeAndDownload(format, attempt + 1), 200);
+      return;
+    }
+    
+    // Kiểm tra contentWindow
+    if (!targetIframe.contentWindow) {
+      console.log('Iframe contentWindow is null, retrying... attempt', attempt + 1);
+      setTimeout(() => this.waitForIframeAndDownload(format, attempt + 1), 200);
+      return;
+    }
+
+    const contentWindow = targetIframe.contentWindow;
+    console.log('Iframe found and ready, triggering download');
+    console.log('Iframe src:', targetIframe.src);
+    console.log('Iframe id:', targetIframe.id);
+    
+    try {
+      // Cách 1: Thử trigger click vào nút download trong toolbar (nếu không cross-origin)
+      const iframeDoc = targetIframe.contentDocument || contentWindow.document;
+      if (iframeDoc) {
+        // Tìm nút download trong toolbar của ONLYOFFICE
+        const selectors = [
+          '[data-id="download"]',
+          '.asc-window-download',
+          '[title*="Download"]',
+          '[aria-label*="Download"]',
+          '.asc-window-menu-download',
+          'button[data-id="download"]'
+        ];
+        
+        for (const selector of selectors) {
+          const downloadBtn = iframeDoc.querySelector(selector) as HTMLElement;
+          if (downloadBtn) {
+            console.log('Found download button with selector:', selector);
+            downloadBtn.click();
+            return;
+          }
+        }
+      }
+    } catch (e) {
+      console.log('Cannot access iframe document (cross-origin), using postMessage');
+    }
+
+    // Cách 2: Sử dụng postMessage để trigger download - ONLYOFFICE API
+    console.log('Triggering download via postMessage, format:', format);
+    
+    const onlyofficeOrigin = new URL(environment.onlyofficeServerUrl).origin;
+    
+    // Gửi message để trigger download
+    contentWindow.postMessage(
+      JSON.stringify({
+        type: 'download',
+        format: format
+      }),
+      onlyofficeOrigin
+    );
+
+    // Hoặc thử trigger save event
+    contentWindow.postMessage(
+      {
+        type: 'action',
+        actiontype: 'download',
+        format: format
+      },
+      onlyofficeOrigin
+    );
+
+    // Hoặc trigger save để trigger onRequestSaveAs
+    contentWindow.postMessage(
+      {
+        type: 'save',
+        format: format
+      },
+      onlyofficeOrigin
+    );
+
+    // Fallback: Hướng dẫn user sử dụng nút trong toolbar
+    setTimeout(() => {
+      console.warn('Download may not have triggered. Please use the Download button in the ONLYOFFICE toolbar.');
+    }, 500);
+  }
+
+  downloadAsPdf(): void {
+    console.log('Download PDF clicked');
+    
+    if (!this.docEditor) {
+      console.warn('Editor not ready');
+      alert('Editor chưa sẵn sàng. Vui lòng đợi document load xong.');
+      return;
+    }
+
+    // Chỉ cho phép download PDF với Word documents
+    if (this.documentType !== 'word') {
+      alert('PDF chỉ có thể download từ Word documents.');
+      return;
+    }
+
+    try {
+      console.log('Downloading as PDF...');
+      // Trigger download PDF từ toolbar
+      this.triggerDownloadFromToolbar('pdf');
+    } catch (error) {
+      console.error('Error downloading PDF:', error);
+      alert('Lỗi khi download PDF. Vui lòng thử lại hoặc sử dụng nút Download trong toolbar của editor.');
+    }
+  }
+
+  triggerDownloadFromIframe(format: string): void {
+    // Tìm iframe của ONLYOFFICE
+    const iframe = document.getElementById('onlyofficeFrame') as HTMLIFrameElement;
+    const targetIframe = iframe || this.onlyofficeFrame?.nativeElement;
+    
+    if (!targetIframe) {
+      console.error('Iframe not found for download');
+      alert('Không thể tìm thấy editor. Vui lòng refresh trang và đợi document load xong.');
+      return;
+    }
+    
+    const contentWindow = targetIframe.contentWindow;
+    if (!contentWindow) {
+      console.error('Iframe contentWindow is null');
+      alert('Editor chưa sẵn sàng. Vui lòng đợi document load xong.');
+      return;
+    }
+    
+    console.log('Triggering download from iframe, format:', format);
+    
+    const onlyofficeOrigin = new URL(environment.onlyofficeServerUrl).origin;
+    
+    // Gửi message để trigger download - ONLYOFFICE API
+    contentWindow.postMessage(
+      JSON.stringify({
+        type: 'download',
+        format: format
+      }),
+      onlyofficeOrigin
+    );
+    
+    // Hoặc thử cách khác
+    contentWindow.postMessage(
+      {
+        type: 'action',
+        actiontype: 'download',
+        format: format
+      },
+      onlyofficeOrigin
+    );
+    
+    // Hoặc trigger save event
+    setTimeout(() => {
+      if (contentWindow) {
+        contentWindow.postMessage(
+          {
+            type: 'save',
+            format: format
+          },
+          onlyofficeOrigin
+        );
+      }
+    }, 100);
   }
 
   onFileSelected(event: Event): void {
@@ -300,20 +668,20 @@ export class DocxEditorComponent implements OnInit {
       const file = input.files[0];
       this.selectedFileName = file.name;
       
-      // Kiểm tra loại file
-      const allowedTypes = [
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
-        'application/msword', // .doc
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
-        'application/vnd.ms-excel', // .xls
-        'application/vnd.openxmlformats-officedocument.presentationml.presentation', // .pptx
-        'application/vnd.ms-powerpoint' // .ppt
-      ];
-      
-      if (!allowedTypes.includes(file.type) && !file.name.match(/\.(docx?|xlsx?|pptx?)$/i)) {
-        alert('Vui lòng chọn file Word, Excel hoặc PowerPoint (.docx, .doc, .xlsx, .xls, .pptx, .ppt)');
+      // Xác định loại file và cập nhật documentType
+      const fileName = file.name.toLowerCase();
+      if (fileName.endsWith('.docx') || fileName.endsWith('.doc')) {
+        this.documentType = 'word';
+        this.currentFileType = fileName.endsWith('.docx') ? 'docx' : 'doc';
+      } else if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+        this.documentType = 'cell';
+        this.currentFileType = fileName.endsWith('.xlsx') ? 'xlsx' : 'xls';
+      } else {
+        alert('Vui lòng chọn file Word (.docx, .doc) hoặc Excel (.xlsx, .xls)');
         return;
       }
+      
+      console.log('File type detected:', this.documentType, 'File extension:', this.currentFileType);
 
       // Upload file lên server
       this.uploadFile(file);
@@ -354,8 +722,12 @@ export class DocxEditorComponent implements OnInit {
         type: file.type || 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' 
       });
       
+      // Revoke previous blob URLs to prevent memory leaks
+      this.revokeBlobUrls();
+      
       // Tạo blob URL
       const blobUrl = URL.createObjectURL(blob);
+      this.blobUrls.add(blobUrl);
       console.log('Created blob URL:', blobUrl);
       
       // Xác định file type từ extension
@@ -401,8 +773,8 @@ export class DocxEditorComponent implements OnInit {
     console.log(`Then load from: http://localhost:3000/${fileName}`);
     
     // Thử load từ http-server ở port 3000
-    // Sử dụng IP thực của máy để Document Server có thể truy cập được
-    const hostIP = '192.168.1.35'; // IP của máy host
+    // Sử dụng hostname từ environment hoặc window.location
+    const hostIP = this.getHostIP();
     const httpServerUrl = `http://${hostIP}:3000/${fileName}`;
     
     // Kiểm tra xem file có tồn tại trên http-server không (từ browser, dùng localhost)
@@ -434,6 +806,9 @@ export class DocxEditorComponent implements OnInit {
 
   loadDocument(documentUrl: string, fileName: string, fileType: string = 'docx'): void {
     if (!isPlatformBrowser(this.platformId)) return;
+
+    // Revoke previous blob URLs before loading new document
+    this.revokeBlobUrls();
 
     // Nếu editor chưa được khởi tạo, đợi script load xong
     if (typeof DocsAPI === 'undefined') {
@@ -534,6 +909,43 @@ export class DocxEditorComponent implements OnInit {
     }
   }
 
+
+  /**
+   * Get host IP from environment or window.location
+   * Falls back to localhost if not configured
+   */
+  private getHostIP(): string {
+    // Use environment configuration first
+    if (environment.hostIP && environment.hostIP !== 'localhost') {
+      return environment.hostIP;
+    }
+    
+    // Try to get from window.location.hostname
+    if (typeof window !== 'undefined') {
+      const hostname = window.location.hostname;
+      // If it's localhost or 127.0.0.1, use localhost
+      // In production, this should be configured via environment.hostIP
+      if (hostname === 'localhost' || hostname === '127.0.0.1') {
+        return 'localhost';
+      }
+      return hostname;
+    }
+    return 'localhost';
+  }
+
+  /**
+   * Revoke all blob URLs to prevent memory leaks
+   */
+  private revokeBlobUrls(): void {
+    this.blobUrls.forEach(url => {
+      try {
+        URL.revokeObjectURL(url);
+      } catch (e) {
+        console.warn('Error revoking blob URL:', e);
+      }
+    });
+    this.blobUrls.clear();
+  }
 
   // ngAfterViewInit(): void {
   //   // URL file DOCX tĩnh (VD: file nằm trên S3 / CDN của bạn)
