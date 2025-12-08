@@ -22,18 +22,45 @@
     </div>
   </div>
 
-  <!-- Item text -->
-  <div class="drag-item" *ngFor="let p of properties" cdkDrag [cdkDragData]="{type: 'text', content: 'Nội dung text kéo thả'}">
-    {{ p.code }}
+  <!-- Item text - Click hoặc kéo thả để chèn vào document -->
+  <div class="drag-item" 
+       *ngFor="let p of properties" 
+       cdkDrag 
+       [cdkDragData]="{type: 'text', content: p.code}"
+       (cdkDragStarted)="onDragStarted(p)"
+       (click)="onItemClick(p)"
+       style="cursor: pointer; padding: 8px; margin: 4px; background: #f5f5f5; border-radius: 4px; border: 1px solid #ddd; transition: all 0.2s;"
+       [style.background]="'#f5f5f5'"
+       (mouseenter)="$event.target.style.background='#e0e0e0'"
+       (mouseleave)="$event.target.style.background='#f5f5f5'">
+    📋 {{ p.code }}
+    <span *cdkDragPreview style="background: #4CAF50; color: white; padding: 4px 8px; border-radius: 4px;">
+      {{ p.code }}
+    </span>
   </div>
-  <!-- Item image -->
-  <!-- <div class="drag-item" cdkDrag [cdkDragData]="{type: 'image', src: 'https://via.placeholder.com/150'}">
-    Kéo hình ảnh này
-  </div> -->
-  <button style="float: both; margin: 10px;" (click)="saveDocument()">Save Document</button>
-  <b cdkDrag [cdkDragData]="{type: 'text', content: '<b>Văn bản in đậm</b>'}">
-    Văn bản in đậm
-  </b>
+  
+  <div style="padding: 10px; font-size: 11px; color: #888; border-top: 1px solid #ddd; margin-top: 10px;">
+    💡 Click vào item để chèn vào vị trí con trỏ trong document
+  </div>
+
+  <!-- Download Section -->
+  <div style="padding: 10px; border-top: 1px solid #ddd; margin-top: 10px;">
+    <label style="display: block; margin-bottom: 10px; font-weight: bold;">
+      💾 Lưu Document
+    </label>
+    <button 
+      type="button"
+      (click)="saveDocument()"
+      style="width: 100%; padding: 10px; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; margin-bottom: 8px;">
+      📥 Download DOCX
+    </button>
+    <button 
+      type="button"
+      (click)="downloadAsPdf()"
+      style="width: 100%; padding: 10px; background: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">
+      📄 Download PDF
+    </button>
+  </div>
 </div>
 
 <!-- <div class="editor-container" 

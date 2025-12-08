@@ -143,17 +143,16 @@ export class DocxEditorComponent implements OnInit {
           autosave: false,
           hideRightMenu: false,
           toolbarNoTabs: false
-        },
-        plugins: {
-          autostart: ['asc.{123e4567-e89b-12d3-a456-426614174000}'], // Thay bằng GUID hợp lệ
-          pluginsData: ['http://10.86.35.191:3000/drag-insert-plugin.js'] // Đảm bảo file tồn tại
         }
+        // Loại bỏ plugins config vì URL không hợp lệ
       },
       width: '100%',
       height: '1024px',
       events: {
-        onReady: function () {
+        onReady: () => {
           console.log('Editor ready');
+          // Lưu reference đến editor để sử dụng sau
+          console.log('DocEditor instance:', this.docEditor);
         },
         onRequestSaveAs: (event: any) => {
           console.log('SaveAs requested', event);
@@ -195,19 +194,73 @@ export class DocxEditorComponent implements OnInit {
     });
   }
 
+  onDragStarted(property: any): void {
+    console.log('Drag started:', property);
+  }
+
+  onItemClick(property: any): void {
+    console.log('Item clicked:', property);
+    // Chèn text vào document khi click
+    this.insertTextToDocument(property.code);
+  }
+
   onDropToEditor(event: CdkDragDrop<any>) {
     console.log('Drop event:', event);
     const dragData = event.item.data;
-    this.sendToIframe(dragData);
     console.log('Dropped data:', dragData);
+    
+    // Chèn text vào document bằng ONLYOFFICE API
+    this.insertTextToDocument(dragData.content);
+  }
+
+  insertTextToDocument(text: string): void {
+    if (!this.docEditor) {
+      console.error('Editor not initialized');
+      alert('Editor chưa sẵn sàng. Vui lòng đợi document load xong.');
+      return;
+    }
+
+    try {
+      // Sử dụng ONLYOFFICE connector API để chèn text
+      // Lấy connector từ editor
+      const connector = this.docEditor.createConnector();
+      
+      if (connector) {
+        console.log('Inserting text via connector:', text);
+        
+        // Sử dụng executeMethod để chèn text tại vị trí con trỏ
+        connector.executeMethod('InsertText', [text], (result: any) => {
+          console.log('Insert result:', result);
+        });
+      } else {
+        // Fallback: Sử dụng postMessage
+        console.log('Connector not available, using postMessage fallback');
+        this.sendToIframe({ type: 'text', content: text });
+      }
+    } catch (error) {
+      console.error('Error inserting text:', error);
+      // Fallback: Sử dụng postMessage
+      this.sendToIframe({ type: 'text', content: text });
+    }
   }
 
   sendToIframe(data: any): void {
-    console.log(this.onlyofficeFrame?.nativeElement);
-    console.log(this.onlyofficeFrame?.nativeElement?.contentWindow);
-
-    if (this.onlyofficeFrame?.nativeElement?.contentWindow) {
-      console.log('Sending to iframe:', data);
+    console.log('Sending to iframe:', data);
+    
+    // Tìm iframe của ONLYOFFICE
+    const iframe = document.querySelector('iframe[name="frameEditor"]') as HTMLIFrameElement;
+    
+    if (iframe?.contentWindow) {
+      console.log('Found ONLYOFFICE iframe, sending message');
+      iframe.contentWindow.postMessage(
+        {
+          type: 'insertItem',
+          data: data
+        },
+        'http://localhost:8080'
+      );
+    } else if (this.onlyofficeFrame?.nativeElement?.contentWindow) {
+      console.log('Using ViewChild iframe');
       this.onlyofficeFrame.nativeElement.contentWindow.postMessage(
         {
           type: 'insertItem',
@@ -217,13 +270,27 @@ export class DocxEditorComponent implements OnInit {
       );
     } else {
       console.error('Iframe contentWindow not available');
+      alert('Không thể chèn text. Vui lòng thử lại sau khi document load xong.');
     }
   }
 
   saveDocument(): void {
     if (this.docEditor) {
-      // Trigger save dialog
-      this.docEditor.downloadAs();
+      // Download as DOCX (giữ nguyên format)
+      this.docEditor.downloadAs('docx');
+      console.log('Downloading as DOCX...');
+    } else {
+      alert('Editor chưa sẵn sàng. Vui lòng đợi document load xong.');
+    }
+  }
+
+  downloadAsPdf(): void {
+    if (this.docEditor) {
+      // Download as PDF
+      this.docEditor.downloadAs('pdf');
+      console.log('Downloading as PDF...');
+    } else {
+      alert('Editor chưa sẵn sàng. Vui lòng đợi document load xong.');
     }
   }
 
@@ -411,10 +478,6 @@ export class DocxEditorComponent implements OnInit {
           autosave: false,
           hideRightMenu: false,
           toolbarNoTabs: false
-        },
-        plugins: {
-          autostart: ['asc.{123e4567-e89b-12d3-a456-426614174000}'],
-          pluginsData: ['http://10.86.35.191:3000/drag-insert-plugin.js']
         }
       },
       width: '100%',
@@ -422,6 +485,7 @@ export class DocxEditorComponent implements OnInit {
       events: {
         onReady: () => {
           console.log('Editor ready with new document');
+          console.log('DocEditor instance:', this.docEditor);
         },
         onRequestSaveAs: (event: any) => {
           console.log('SaveAs requested', event);
