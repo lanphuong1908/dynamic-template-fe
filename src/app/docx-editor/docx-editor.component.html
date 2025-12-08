@@ -1,4 +1,27 @@
 <div class="sidebar" cdkDropList #sourceList="cdkDropList" [cdkDropListConnectedTo]="[targetList]">
+  <!-- Upload Document Button -->
+  <div style="padding: 10px; border-bottom: 1px solid #ddd;">
+    <label for="fileInput" style="display: block; margin-bottom: 10px; font-weight: bold; cursor: pointer;">
+      📄 Chọn Document
+    </label>
+    <input 
+      type="file" 
+      id="fileInput" 
+      #fileInput
+      accept=".docx,.doc,.xlsx,.xls,.pptx,.ppt"
+      (change)="onFileSelected($event)"
+      style="display: none;">
+    <button 
+      type="button"
+      (click)="fileInput.click()"
+      style="width: 100%; padding: 8px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer;">
+      Chọn File
+    </button>
+    <div *ngIf="selectedFileName" style="margin-top: 5px; font-size: 12px; color: #666;">
+      File: {{ selectedFileName }}
+    </div>
+  </div>
+
   <!-- Item text -->
   <div class="drag-item" *ngFor="let p of properties" cdkDrag [cdkDragData]="{type: 'text', content: 'Nội dung text kéo thả'}">
     {{ p.code }}
@@ -31,7 +54,6 @@
           width="100%" 
           height="600px" 
           frameborder="0"
-          [style.pointer-events]="'auto'"
-          allow="drag-drop">
+          [style.pointer-events]="'auto'">
   </iframe>
 </div>
