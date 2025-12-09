@@ -155,11 +155,14 @@ export class DocxEditorComponent implements OnInit {
     const fileName = this.documentType === 'word' ? 'sample.docx' : 'sample.xlsx';
     const fileType = this.currentFileType;
     
-    // Sử dụng file sample từ Document Server (đã copy vào container)
-    const sampleDocUrl = `http://localhost/web-apps/${fileName}`;
+    // Sử dụng file từ http-server (port 3000) chạy trên máy host
+    // Document Server trong Docker cần dùng host.docker.internal để truy cập máy host
+    // Yêu cầu: cd s3-demo && npx http-server ./docs -p 3000 --cors
+    const sampleDocUrl = `http://host.docker.internal:3000/${fileName}`;
     
     console.log('Creating new document:', fileName, 'Type:', this.documentType);
     console.log('Loading from URL:', sampleDocUrl);
+    console.log('Note: Ensure http-server is running: cd s3-demo && npx http-server ./docs -p 3000 --cors');
     
     this.loadDocument(sampleDocUrl, fileName, fileType);
   }
@@ -175,12 +178,13 @@ export class DocxEditorComponent implements OnInit {
     const docDocumentType = this.documentType;
     
     if (!defaultUrl) {
-      // Sử dụng file từ Document Server container (đã copy vào /var/www/onlyoffice/documentserver/web-apps/)
-      // File được serve qua nginx của Document Server (port 80 bên trong container)
-      // Document Server sẽ tải file từ chính nó, tránh vấn đề private IP
+      // Sử dụng file từ http-server (port 3000) chạy trên máy host
+      // Document Server trong Docker cần dùng host.docker.internal để truy cập máy host
+      // Yêu cầu: cd s3-demo && npx http-server ./docs -p 3000 --cors
       const defaultFileName = docFileType === 'docx' || docFileType === 'doc' ? 'sample.docx' : 'sample.xlsx';
-      defaultUrl = `http://localhost/web-apps/${defaultFileName}`;
-      console.log('Using file from Document Server:', defaultUrl);
+      defaultUrl = `http://host.docker.internal:3000/${defaultFileName}`;
+      console.log('Using file from local http-server:', defaultUrl);
+      console.log('Note: Ensure http-server is running: cd s3-demo && npx http-server ./docs -p 3000 --cors');
     }
     
     // Nếu URL chứa IP private (192.168.x.x, 10.x.x.x, 172.x.x.x), Document Server sẽ chặn
@@ -286,6 +290,21 @@ export class DocxEditorComponent implements OnInit {
           if (event.data && event.data.errorCode) {
             console.error('Error code:', event.data.errorCode);
             console.error('Error description:', event.data.errorDescription);
+            
+            // Handle Download failed error (errorCode -4)
+            if (event.data.errorCode === -4) {
+              console.error('Download failed: Document Server cannot download file from URL');
+              console.error('URL:', defaultUrl);
+              console.error('Solution: Copy file into Document Server container:');
+              console.error('1. docker cp s3-demo/docs/sample.docx <container_name>:/var/www/onlyoffice/documentserver/web-apps/');
+              console.error('2. docker cp s3-demo/docs/sample.xlsx <container_name>:/var/www/onlyoffice/documentserver/web-apps/');
+              console.error('3. Restart Document Server if needed');
+              
+              alert('Lỗi: Không thể tải file từ URL.\n\n' +
+                    'Giải pháp: Copy file vào Document Server container:\n' +
+                    'docker cp s3-demo/docs/sample.docx <container_name>:/var/www/onlyoffice/documentserver/web-apps/\n' +
+                    'docker cp s3-demo/docs/sample.xlsx <container_name>:/var/www/onlyoffice/documentserver/web-apps/');
+            }
           }
         }
       }
@@ -761,45 +780,37 @@ export class DocxEditorComponent implements OnInit {
     console.log('Preparing file for ONLYOFFICE:', file.name);
     
     // ONLYOFFICE cần một URL thực sự, không thể dùng blob URL
-    // Giải pháp: Copy file vào thư mục s3-demo/docs/ và load từ http-server
-    // Hoặc tạo một endpoint để serve file tạm thời
+    // File cần có sẵn trong thư mục s3-demo/docs/ và được serve qua http-server
     
-    // Tạm thời: Hướng dẫn user copy file vào s3-demo/docs/
     const fileName = file.name;
     const targetPath = `s3-demo/docs/${fileName}`;
     
     console.log(`File selected: ${fileName}`);
-    console.log(`Please copy this file to: ${targetPath}`);
-    console.log(`Then load from: http://localhost:3000/${fileName}`);
+    console.log(`Checking if file exists at: http://localhost:3000/${fileName}`);
     
-    // Thử load từ http-server ở port 3000
-    // Sử dụng hostname từ environment hoặc window.location
-    const hostIP = this.getHostIP();
-    const httpServerUrl = `http://${hostIP}:3000/${fileName}`;
+    // URL cho Document Server trong Docker (dùng host.docker.internal để truy cập máy host)
+    const dockerUrl = `http://host.docker.internal:3000/${fileName}`;
     
     // Kiểm tra xem file có tồn tại trên http-server không (từ browser, dùng localhost)
     const checkUrl = `http://localhost:3000/${fileName}`;
     this.http.head(checkUrl, { observe: 'response' }).subscribe({
       next: () => {
-        // File đã có trên http-server, load từ đó (dùng IP thực cho Document Server)
-        console.log('File found on http-server, loading from:', httpServerUrl);
-        this.currentDocumentUrl = httpServerUrl;
-        this.loadDocument(httpServerUrl, fileName, fileType);
+        // File đã có trên http-server, load từ đó
+        // Dùng host.docker.internal để Document Server có thể truy cập từ trong Docker
+        console.log('File found on http-server, loading from:', dockerUrl);
+        this.currentDocumentUrl = dockerUrl;
+        this.loadDocument(dockerUrl, fileName, fileType);
       },
       error: () => {
         // File chưa có trên http-server
-        console.warn('File not found on http-server. Using blob URL (may not work).');
+        console.warn('File not found on http-server.');
         console.log('To fix this:');
         console.log(`1. Copy file to: ${targetPath}`);
         console.log(`2. Ensure http-server is running: cd s3-demo && npx http-server ./docs -p 3000 --cors`);
         console.log(`3. Refresh and select file again`);
         
-        // Thử với blob URL (có thể không hoạt động)
-        this.currentDocumentUrl = blobUrl;
-        this.loadDocument(blobUrl, fileName, fileType);
-        
         // Hiển thị hướng dẫn cho user
-        alert(`Đã chọn file: ${fileName}\n\n⚠️ Lưu ý: File cần được copy vào thư mục s3-demo/docs/\n\nĐể load file:\n1. Copy file "${fileName}" vào thư mục s3-demo/docs/\n2. Đảm bảo http-server đang chạy: cd s3-demo && npx http-server ./docs -p 3000 --cors\n3. Refresh trang và chọn lại file\n\nHoặc file sẽ được thử load từ blob URL (có thể không hoạt động).`);
+        alert(`File "${fileName}" chưa có trong thư mục s3-demo/docs/\n\nĐể mở file:\n1. Copy file "${fileName}" vào thư mục s3-demo/docs/\n2. Đảm bảo http-server đang chạy\n3. Refresh trang và chọn lại file`);
       }
     });
   }
@@ -878,10 +889,19 @@ export class DocxEditorComponent implements OnInit {
             console.error('Error code:', event.data.errorCode);
             console.error('Error description:', event.data.errorDescription);
             
-            // Nếu lỗi download failed, thử các URL khác
+            // Handle Download failed error (errorCode -4)
             if (event.data.errorCode === -4) {
-              console.error('Download failed. Trying alternative URLs...');
-              // Có thể thử lại với URL khác hoặc hiển thị hướng dẫn
+              console.error('Download failed: Document Server cannot download file from URL');
+              console.error('Document URL:', documentUrl);
+              console.error('Solution: Copy file into Document Server container:');
+              console.error('1. docker cp s3-demo/docs/sample.docx <container_name>:/var/www/onlyoffice/documentserver/web-apps/');
+              console.error('2. docker cp s3-demo/docs/sample.xlsx <container_name>:/var/www/onlyoffice/documentserver/web-apps/');
+              console.error('3. Restart Document Server if needed');
+              
+              alert('Lỗi: Không thể tải file từ URL.\n\n' +
+                    'Giải pháp: Copy file vào Document Server container:\n' +
+                    'docker cp s3-demo/docs/sample.docx <container_name>:/var/www/onlyoffice/documentserver/web-apps/\n' +
+                    'docker cp s3-demo/docs/sample.xlsx <container_name>:/var/www/onlyoffice/documentserver/web-apps/');
             }
           }
         }
