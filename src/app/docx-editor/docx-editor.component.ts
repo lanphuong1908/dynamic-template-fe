@@ -36,6 +36,20 @@ export class DocxEditorComponent implements OnInit {
   // Search and filter
   searchText: string = '';
   selectedProperty: string | null = null;
+  
+  // Data type selection - mỗi property có kiểu dữ liệu riêng
+  propertyDataTypes: Map<string, string> = new Map(); // Map<propertyCode, dataType>
+  dataTypes: string[] = ['string', 'number', 'date', 'datetime', 'boolean', 'currency', 'percentage', 'text'];
+  
+  // Lấy kiểu dữ liệu cho một property (mặc định là 'string')
+  getDataTypeForProperty(propertyCode: string): string {
+    return this.propertyDataTypes.get(propertyCode) || 'string';
+  }
+  
+  // Set kiểu dữ liệu cho một property
+  setDataTypeForProperty(propertyCode: string, dataType: string): void {
+    this.propertyDataTypes.set(propertyCode, dataType);
+  }
 
   constructor(
 		private propsSvc: PropertiesService,
@@ -389,16 +403,35 @@ export class DocxEditorComponent implements OnInit {
     console.log('Drag started:', property);
   }
 
+  getFormattedPropertyCode(propertyCode: string, dataType?: string): string {
+    // Format: ${dataType.propertyCode}
+    const dt = dataType || this.getDataTypeForProperty(propertyCode);
+    return '${' + dt + '.' + propertyCode + '}';
+  }
+
   onItemClick(property: any): void {
+    // Không làm gì khi click vào item, chỉ highlight
     console.log('Item clicked:', property);
+    this.selectedProperty = property.code;
+    setTimeout(() => {
+      this.selectedProperty = null;
+    }, 500);
+  }
+  
+  onCopyClick(event: Event, property: any): void {
+    // Ngăn event bubble lên item
+    event.stopPropagation();
+    
+    console.log('Copy icon clicked:', property);
     // Highlight selected property
     this.selectedProperty = property.code;
     setTimeout(() => {
       this.selectedProperty = null;
     }, 500);
     
-    // Copy vào clipboard (Ctrl+C)
-    const textToCopy = property.code;
+    // Copy vào clipboard với format: ${dataType.propertyCode}
+    const dataType = this.getDataTypeForProperty(property.code);
+    const textToCopy = this.getFormattedPropertyCode(property.code, dataType);
     navigator.clipboard.writeText(textToCopy).then(() => {
       console.log('✅ Đã copy vào clipboard:', textToCopy);
       this.showNotification(`✓ Đã copy: ${textToCopy} → Nhấn Ctrl+V để paste`, 'success');
@@ -407,6 +440,16 @@ export class DocxEditorComponent implements OnInit {
       // Fallback cho trình duyệt không hỗ trợ Clipboard API
       this.fallbackCopyTextToClipboard(textToCopy);
     });
+  }
+  
+  onDataTypeChange(event: Event, property: any): void {
+    // Ngăn event bubble lên item
+    event.stopPropagation();
+    
+    const selectElement = event.target as HTMLSelectElement;
+    const selectedDataType = selectElement.value;
+    this.setDataTypeForProperty(property.code, selectedDataType);
+    console.log(`Đã đổi kiểu dữ liệu của ${property.code} thành: ${selectedDataType}`);
   }
   
   // Fallback method cho trình duyệt cũ không hỗ trợ Clipboard API
@@ -476,7 +519,10 @@ export class DocxEditorComponent implements OnInit {
     console.log('Dropped data:', dragData);
     
     // Chèn text vào document bằng ONLYOFFICE API
-    this.insertTextToDocument(dragData.content);
+    // dragData.content đã được format sẵn từ cdkDragData
+    if (dragData && dragData.content) {
+      this.insertTextToDocument(dragData.content);
+    }
   }
 
   insertTextToDocument(text: string): void {

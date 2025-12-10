@@ -31,7 +31,7 @@ export class PropertiesService {
       // Convert to CustomerProperty objects
       const properties = fields.map(field => ({
         id: crypto.randomUUID(),
-        code: '${' + field.toUpperCase() + '}',
+        code:  field.toUpperCase(),
         name: field.toUpperCase() // You can add proper name mapping here if needed
       }));
 

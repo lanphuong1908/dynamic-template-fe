@@ -84,19 +84,44 @@
         class="property-item" 
         *ngFor="let p of filteredProperties" 
         cdkDrag 
-        [cdkDragData]="{type: 'text', content: p.code}"
+        [cdkDragData]="{type: 'text', content: getFormattedPropertyCode(p.code, getDataTypeForProperty(p.code))}"
         (cdkDragStarted)="onDragStarted(p)"
-        (click)="onItemClick(p)"
         [class.selected]="selectedProperty === p.code">
         <div class="property-icon">📋</div>
         <div class="property-content">
-          <div class="property-label">{{ p.name || p.code }}</div>
-          <div class="property-code">{{ p.code }}</div>
+          <div class="property-header">
+            <div class="property-actions">
+              <!-- Dropdown để chọn kiểu dữ liệu -->
+              <select 
+                class="property-data-type-select"
+                [value]="getDataTypeForProperty(p.code)"
+                (change)="onDataTypeChange($event, p)"
+                (click)="$event.stopPropagation()"
+                title="Chọn kiểu dữ liệu">
+                <option *ngFor="let type of dataTypes" [value]="type">
+                  {{ type }}
+                </option>
+              </select>
+              <!-- Icon copy -->
+              <button 
+                type="button"
+                class="property-copy-btn"
+                (click)="onCopyClick($event, p)"
+                title="Copy vào clipboard">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div class="property-formatted-code">
+            {{ getFormattedPropertyCode(p.code, getDataTypeForProperty(p.code)) }}
+          </div>
           <div class="property-description" *ngIf="p.description">{{ p.description }}</div>
         </div>
-        <div class="property-action">→</div>
         <span *cdkDragPreview class="drag-preview">
-          {{ p.code }}
+          {{ getFormattedPropertyCode(p.code, getDataTypeForProperty(p.code)) }}
         </span>
       </div>
       
