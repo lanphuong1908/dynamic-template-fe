@@ -235,6 +235,13 @@ export class DocxEditorComponent implements OnInit {
           console.log('DocEditor instance:', this.docEditor);
           console.log('DocEditor methods:', Object.keys(this.docEditor || {}));
           
+          // Log các methods có sẵn để debug
+          if (this.docEditor) {
+            console.log('Available methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(this.docEditor)));
+            console.log('Has downloadAs?', typeof this.docEditor.downloadAs);
+            console.log('Has createConnector?', typeof this.docEditor.createConnector);
+          }
+          
           // Kiểm tra iframe sau khi editor ready
           setTimeout(() => {
             const iframe = document.getElementById('onlyofficeFrame');
@@ -255,31 +262,17 @@ export class DocxEditorComponent implements OnInit {
             return;
           }
 
-          try {
-            // Tạo link download với tên file phù hợp
-            const link = document.createElement('a');
-            link.href = downloadData;
-            const extension = this.documentType === 'word' ? 'docx' : 'xlsx';
-            const fileName = this.selectedFileName 
-              ? this.selectedFileName.replace(/\.[^.]+$/, '') + '-edited.' + extension
-              : `edited-document.${extension}`;
-            link.download = fileName;
-            
-            console.log('Downloading file:', fileName);
-            console.log('Download URL:', downloadData);
-            
-            document.body.appendChild(link);
-            link.click();
-            
-            // Đợi một chút trước khi remove
-            setTimeout(() => {
-              if (document.body.contains(link)) {
-                document.body.removeChild(link);
-              }
-            }, 100);
-          } catch (error) {
-            console.error('Error creating download link:', error);
-            alert('Lỗi khi tạo link download. Vui lòng thử lại.');
+          this.handleDownloadFromEvent({ url: downloadData, fileType: this.documentType === 'word' ? 'docx' : 'xlsx' });
+        },
+        onDownloadAs: (event: any) => {
+          console.log('onDownloadAs event received:', event);
+          console.log('Event data:', event.data);
+          
+          if (event.data && event.data.url) {
+            console.log('✅ Handling onDownloadAs event');
+            this.handleDownloadFromEvent(event.data);
+          } else {
+            console.warn('onDownloadAs event missing URL:', event);
           }
         },
         onDocumentStateChange: (event: any) => {
@@ -325,7 +318,71 @@ export class DocxEditorComponent implements OnInit {
     window.addEventListener('message', (event) => {
       if (event.origin !== onlyofficeOrigin) return;
       console.log('From iframe:', event.data);
+      
+      // Xử lý event onDownloadAs từ ONLYOFFICE
+      if (event.data && typeof event.data === 'object') {
+        const data = event.data;
+        
+        // Kiểm tra event onDownloadAs
+        if (data.event === 'onDownloadAs' && data.data && data.data.url) {
+          console.log('✅ Received onDownloadAs event:', data.data);
+          this.handleDownloadFromEvent(data.data);
+        }
+      }
+      
+      // Xử lý nếu data là string JSON
+      if (typeof event.data === 'string') {
+        try {
+          const parsed = JSON.parse(event.data);
+          if (parsed.event === 'onDownloadAs' && parsed.data && parsed.data.url) {
+            console.log('✅ Received onDownloadAs event (string):', parsed.data);
+            this.handleDownloadFromEvent(parsed.data);
+          }
+        } catch (e) {
+          // Không phải JSON, bỏ qua
+        }
+      }
     });
+  }
+  
+  private handleDownloadFromEvent(data: any): void {
+    const downloadUrl = data.url;
+    const fileType = data.fileType || (this.documentType === 'word' ? 'docx' : 'xlsx');
+    
+    if (!downloadUrl) {
+      console.error('No download URL in event data');
+      return;
+    }
+    
+    console.log('Downloading file from URL:', downloadUrl);
+    console.log('File type:', fileType);
+    
+    try {
+      // Tạo link download và trigger click
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = this.selectedFileName 
+        ? this.selectedFileName.replace(/\.[^.]+$/, '') + '-edited.' + fileType
+        : `edited-document.${fileType}`;
+      link.style.display = 'none';
+      
+      document.body.appendChild(link);
+      link.click();
+      
+      // Đợi một chút trước khi remove
+      setTimeout(() => {
+        if (document.body.contains(link)) {
+          document.body.removeChild(link);
+        }
+      }, 100);
+      
+      this.showNotification(`✓ Đã download ${fileType.toUpperCase()} thành công!`, 'success');
+    } catch (error) {
+      console.error('Error creating download link:', error);
+      // Fallback: Mở URL trong tab mới
+      window.open(downloadUrl, '_blank');
+      this.showNotification(`✓ Đã mở file ${fileType.toUpperCase()} trong tab mới`, 'info');
+    }
   }
 
   onDragStarted(property: any): void {
@@ -339,8 +396,45 @@ export class DocxEditorComponent implements OnInit {
     setTimeout(() => {
       this.selectedProperty = null;
     }, 500);
-    // Chèn text vào document khi click
-    this.insertTextToDocument(property.code);
+    
+    // Copy vào clipboard (Ctrl+C)
+    const textToCopy = property.code;
+    navigator.clipboard.writeText(textToCopy).then(() => {
+      console.log('✅ Đã copy vào clipboard:', textToCopy);
+      this.showNotification(`✓ Đã copy: ${textToCopy} → Nhấn Ctrl+V để paste`, 'success');
+    }).catch((err) => {
+      console.error('❌ Lỗi khi copy:', err);
+      // Fallback cho trình duyệt không hỗ trợ Clipboard API
+      this.fallbackCopyTextToClipboard(textToCopy);
+    });
+  }
+  
+  // Fallback method cho trình duyệt cũ không hỗ trợ Clipboard API
+  private fallbackCopyTextToClipboard(text: string): void {
+    const textArea = document.createElement('textarea');
+    textArea.value = text;
+    textArea.style.position = 'fixed';
+    textArea.style.left = '-999999px';
+    textArea.style.top = '-999999px';
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    
+    try {
+      const successful = document.execCommand('copy');
+      if (successful) {
+        console.log('✅ Đã copy (fallback):', text);
+        this.showNotification(`✓ Đã copy: ${text} → Nhấn Ctrl+V để paste`, 'success');
+      } else {
+        console.error('❌ Fallback copy failed');
+        alert(`Copy thủ công: ${text}`);
+      }
+    } catch (err) {
+      console.error('❌ Fallback copy error:', err);
+      alert(`Copy thủ công: ${text}`);
+    } finally {
+      document.body.removeChild(textArea);
+    }
   }
 
   filterProperties(): void {
@@ -511,7 +605,19 @@ export class DocxEditorComponent implements OnInit {
       const format = this.documentType === 'word' ? 'docx' : 'xlsx';
       console.log('Downloading as', format.toUpperCase(), '...');
       
-      // Thử dùng Developer Edition API trước
+      // Cách 1: Thử dùng method downloadAs() trực tiếp (nếu có)
+      if (typeof this.docEditor.downloadAs === 'function') {
+        console.log('✅ Using downloadAs() method');
+        try {
+          this.docEditor.downloadAs(format);
+          this.showNotification(`✓ Đang download ${format.toUpperCase()}...`, 'success');
+          return;
+        } catch (e) {
+          console.log('downloadAs() method failed:', e);
+        }
+      }
+      
+      // Cách 2: Thử dùng Developer Edition API với createConnector
       if (typeof this.docEditor.createConnector === 'function') {
         try {
           const connector = this.docEditor.createConnector();
@@ -519,22 +625,54 @@ export class DocxEditorComponent implements OnInit {
             console.log('✅ Using Developer Edition API - DownloadAs');
             connector.executeMethod('DownloadAs', [format], (result: any) => {
               console.log('Download triggered:', result);
-              if (result) {
-                this.showNotification(`✓ Đang download ${format.toUpperCase()}...`, 'success');
-              }
+              // Nếu result là undefined, có thể đã trigger download thành công
+              this.showNotification(`✓ Đang download ${format.toUpperCase()}...`, 'success');
             });
             return;
           }
         } catch (e) {
-          console.log('Developer Edition API failed, using fallback:', e);
+          console.log('Developer Edition API failed:', e);
         }
       }
       
-      // Fallback: Trigger download từ toolbar
-      this.triggerDownloadFromToolbar(format);
+      // Cách 3: Trigger download bằng cách gửi message vào iframe
+      const iframe = document.getElementById('onlyofficeFrame') as HTMLIFrameElement;
+      if (iframe && iframe.contentWindow) {
+        console.log('✅ Trying to trigger download via postMessage');
+        const onlyofficeOrigin = new URL(environment.onlyofficeServerUrl).origin;
+        
+        // Thử trigger download bằng postMessage
+        iframe.contentWindow.postMessage(
+          JSON.stringify({
+            type: 'download',
+            format: format
+          }),
+          onlyofficeOrigin
+        );
+        
+        // Hoặc thử cách khác
+        setTimeout(() => {
+          iframe.contentWindow?.postMessage(
+            {
+              type: 'action',
+              actiontype: 'download',
+              format: format
+            },
+            onlyofficeOrigin
+          );
+        }, 100);
+        
+        this.showNotification(`✓ Đang download ${format.toUpperCase()}...`, 'success');
+        return;
+      }
+      
+      // Fallback: Hướng dẫn user dùng nút Download trong toolbar
+      console.warn('⚠️ All download methods failed');
+      alert('Vui lòng sử dụng nút "Download" trong toolbar của editor (góc trên bên phải) để tải file về.');
+      
     } catch (error) {
       console.error('Error downloading document:', error);
-      alert('Lỗi khi download. Vui lòng thử lại hoặc sử dụng nút Download trong toolbar của editor.');
+      alert('Lỗi khi download. Vui lòng sử dụng nút Download trong toolbar của editor.');
     }
   }
 
@@ -685,7 +823,15 @@ export class DocxEditorComponent implements OnInit {
     try {
       console.log('Downloading as PDF...');
       
-      // Thử dùng Developer Edition API trước
+      // Cách 1: Thử dùng method downloadAs() trực tiếp (nếu có)
+      if (typeof this.docEditor.downloadAs === 'function') {
+        console.log('✅ Using downloadAs() method for PDF');
+        this.docEditor.downloadAs('pdf');
+        this.showNotification('✓ Đang download PDF...', 'success');
+        return;
+      }
+      
+      // Cách 2: Thử dùng Developer Edition API với createConnector
       if (typeof this.docEditor.createConnector === 'function') {
         try {
           const connector = this.docEditor.createConnector();
@@ -693,22 +839,23 @@ export class DocxEditorComponent implements OnInit {
             console.log('✅ Using Developer Edition API - DownloadAs PDF');
             connector.executeMethod('DownloadAs', ['pdf'], (result: any) => {
               console.log('PDF download triggered:', result);
-              if (result) {
-                this.showNotification('✓ Đang download PDF...', 'success');
-              }
+              // Nếu result là undefined, có thể đã trigger download thành công
+              this.showNotification('✓ Đang download PDF...', 'success');
             });
             return;
           }
         } catch (e) {
-          console.log('Developer Edition API failed, using fallback:', e);
+          console.log('Developer Edition API failed:', e);
         }
       }
       
-      // Fallback: Trigger download PDF từ toolbar
-      this.triggerDownloadFromToolbar('pdf');
+      // Fallback: Hướng dẫn user
+      console.warn('⚠️ Direct PDF download methods not available');
+      alert('Vui lòng sử dụng nút "Download" trong toolbar của editor và chọn định dạng PDF để tải file về.');
+      
     } catch (error) {
       console.error('Error downloading PDF:', error);
-      alert('Lỗi khi download PDF. Vui lòng thử lại hoặc sử dụng nút Download trong toolbar của editor.');
+      alert('Lỗi khi download PDF. Vui lòng sử dụng nút Download trong toolbar của editor.');
     }
   }
 
