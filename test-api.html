@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test ONLYOFFICE Developer Edition API</title>
+    <script src="http://localhost:8080/web-apps/apps/api/documents/api.js"></script>
+</head>
+<body>
+    <h1>Test ONLYOFFICE Developer Edition API</h1>
+    <div id="status">Đang kiểm tra...</div>
+    <div id="result"></div>
+
+    <script>
+        window.onload = function() {
+            const statusDiv = document.getElementById('status');
+            const resultDiv = document.getElementById('result');
+            
+            // Kiểm tra DocsAPI có load không
+            if (typeof DocsAPI === 'undefined') {
+                statusDiv.innerHTML = '❌ DocsAPI chưa load được. Kiểm tra:<br>' +
+                    '1. Document Server có đang chạy: <code>docker ps | grep onlyoffice-documentserver-de</code><br>' +
+                    '2. URL đúng: <code>http://localhost:8080/web-apps/apps/api/documents/api.js</code>';
+                return;
+            }
+            
+            statusDiv.innerHTML = '✅ DocsAPI đã load';
+            
+            // Tạo editor test
+            const config = {
+                document: {
+                    fileType: 'docx',
+                    key: 'test-' + Date.now(),
+                    title: 'test.docx',
+                    url: 'http://host.docker.internal:3000/sample.docx'
+                },
+                documentType: 'word',
+                editorConfig: {
+                    mode: 'edit',
+                    user: {
+                        id: 'test-user',
+                        name: 'Test User'
+                    }
+                },
+                events: {
+                    onDocumentReady: function() {
+                        resultDiv.innerHTML += '<p>✅ Document ready</p>';
+                        
+                        // Kiểm tra createConnector
+                        try {
+                            const editor = window.docEditor;
+                            if (editor && typeof editor.createConnector === 'function') {
+                                resultDiv.innerHTML += '<p>✅ createConnector() API có sẵn (Developer Edition)</p>';
+                                
+                                // Test executeMethod
+                                const connector = editor.createConnector();
+                                if (connector && typeof connector.executeMethod === 'function') {
+                                    resultDiv.innerHTML += '<p>✅ executeMethod() API có sẵn</p>';
+                                    resultDiv.innerHTML += '<p style="color: green; font-weight: bold;">🎉 Developer Edition hoạt động đúng!</p>';
+                                } else {
+                                    resultDiv.innerHTML += '<p>❌ executeMethod() không có sẵn</p>';
+                                }
+                            } else {
+                                resultDiv.innerHTML += '<p>❌ createConnector() không có sẵn - Có thể đang dùng Community Edition</p>';
+                            }
+                        } catch (e) {
+                            resultDiv.innerHTML += '<p>❌ Lỗi khi kiểm tra API: ' + e.message + '</p>';
+                        }
+                    },
+                    onError: function(event) {
+                        resultDiv.innerHTML += '<p style="color: red;">❌ Lỗi: ' + JSON.stringify(event.data) + '</p>';
+                    }
+                }
+            };
+            
+            try {
+                window.docEditor = new DocsAPI.DocEditor('onlyofficeFrame', config);
+                resultDiv.innerHTML += '<p>✅ Editor đã khởi tạo</p>';
+            } catch (e) {
+                resultDiv.innerHTML += '<p style="color: red;">❌ Lỗi khởi tạo editor: ' + e.message + '</p>';
+            }
+        };
+    </script>
+    
+    <iframe id="onlyofficeFrame" width="100%" height="600px" frameborder="0"></iframe>
+</body>
+</html>
+

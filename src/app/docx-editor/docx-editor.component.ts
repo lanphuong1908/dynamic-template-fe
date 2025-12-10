@@ -393,27 +393,76 @@ export class DocxEditorComponent implements OnInit {
     }
 
     try {
-      // Sử dụng ONLYOFFICE connector API để chèn text
+      // Sử dụng ONLYOFFICE connector API (Developer Edition)
       // Lấy connector từ editor
       const connector = this.docEditor.createConnector();
       
-      if (connector) {
-        console.log('Inserting text via connector:', text);
+      if (connector && typeof connector.executeMethod === 'function') {
+        console.log('✅ Using Developer Edition API - Inserting text:', text);
         
-        // Sử dụng executeMethod để chèn text tại vị trí con trỏ
-        connector.executeMethod('InsertText', [text], (result: any) => {
-          console.log('Insert result:', result);
-        });
+        // Focus vào iframe để đảm bảo cursor được đặt
+        const iframe = document.getElementById('onlyofficeFrame') as HTMLIFrameElement;
+        if (iframe) {
+          iframe.focus();
+        }
+        
+        // Đợi một chút để đảm bảo focus được áp dụng
+        setTimeout(() => {
+          // Sử dụng executeMethod để chèn text tại vị trí con trỏ
+          // Tham số: [text, select] - select = false để không select text sau khi chèn
+          connector.executeMethod('InsertText', [text, false], (result: any) => {
+            console.log('✅ Text inserted successfully:', text, result);
+            // Hiển thị notification
+            this.showNotification(`✓ Đã chèn: ${text}`, 'success');
+          });
+        }, 200);
       } else {
-        // Fallback: Sử dụng postMessage
-        console.log('Connector not available, using postMessage fallback');
-        this.sendToIframe({ type: 'text', content: text });
+        console.warn('⚠️ createConnector not available - may be Community Edition');
+        // Fallback: Copy vào clipboard và yêu cầu user paste
+        navigator.clipboard.writeText(text).then(() => {
+          this.showNotification(`📋 Đã copy: ${text} → Nhấn Ctrl+V để paste`, 'info');
+        }).catch(() => {
+          alert(`Copy thủ công: ${text}`);
+        });
       }
     } catch (error) {
-      console.error('Error inserting text:', error);
-      // Fallback: Sử dụng postMessage
-      this.sendToIframe({ type: 'text', content: text });
+      console.error('❌ Error inserting text:', error);
+      // Fallback: Copy vào clipboard
+      navigator.clipboard.writeText(text).then(() => {
+        this.showNotification(`📋 Đã copy: ${text} → Nhấn Ctrl+V để paste`, 'info');
+      }).catch(() => {
+        alert(`Copy thủ công: ${text}`);
+      });
     }
+  }
+
+  private showNotification(message: string, type: 'success' | 'info' = 'info'): void {
+    const notification = document.createElement('div');
+    notification.textContent = message;
+    notification.style.cssText = `
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: ${type === 'success' ? '#4CAF50' : '#2196F3'};
+      color: white;
+      padding: 12px 20px;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      z-index: 10000;
+      font-size: 14px;
+      max-width: 400px;
+    `;
+    document.body.appendChild(notification);
+    
+    setTimeout(() => {
+      notification.style.opacity = '0';
+      notification.style.transition = 'opacity 0.3s ease';
+      setTimeout(() => {
+        if (document.body.contains(notification)) {
+          document.body.removeChild(notification);
+        }
+      }, 300);
+    }, 3000);
   }
 
   sendToIframe(data: any): void {
@@ -461,10 +510,27 @@ export class DocxEditorComponent implements OnInit {
       // Download với format tương ứng (docx hoặc xlsx)
       const format = this.documentType === 'word' ? 'docx' : 'xlsx';
       console.log('Downloading as', format.toUpperCase(), '...');
-      console.log('DocEditor instance:', this.docEditor);
-      console.log('Document type:', this.documentType);
       
-      // Thử trigger download từ toolbar của ONLYOFFICE
+      // Thử dùng Developer Edition API trước
+      if (typeof this.docEditor.createConnector === 'function') {
+        try {
+          const connector = this.docEditor.createConnector();
+          if (connector && typeof connector.executeMethod === 'function') {
+            console.log('✅ Using Developer Edition API - DownloadAs');
+            connector.executeMethod('DownloadAs', [format], (result: any) => {
+              console.log('Download triggered:', result);
+              if (result) {
+                this.showNotification(`✓ Đang download ${format.toUpperCase()}...`, 'success');
+              }
+            });
+            return;
+          }
+        } catch (e) {
+          console.log('Developer Edition API failed, using fallback:', e);
+        }
+      }
+      
+      // Fallback: Trigger download từ toolbar
       this.triggerDownloadFromToolbar(format);
     } catch (error) {
       console.error('Error downloading document:', error);
@@ -618,7 +684,27 @@ export class DocxEditorComponent implements OnInit {
 
     try {
       console.log('Downloading as PDF...');
-      // Trigger download PDF từ toolbar
+      
+      // Thử dùng Developer Edition API trước
+      if (typeof this.docEditor.createConnector === 'function') {
+        try {
+          const connector = this.docEditor.createConnector();
+          if (connector && typeof connector.executeMethod === 'function') {
+            console.log('✅ Using Developer Edition API - DownloadAs PDF');
+            connector.executeMethod('DownloadAs', ['pdf'], (result: any) => {
+              console.log('PDF download triggered:', result);
+              if (result) {
+                this.showNotification('✓ Đang download PDF...', 'success');
+              }
+            });
+            return;
+          }
+        } catch (e) {
+          console.log('Developer Edition API failed, using fallback:', e);
+        }
+      }
+      
+      // Fallback: Trigger download PDF từ toolbar
       this.triggerDownloadFromToolbar('pdf');
     } catch (error) {
       console.error('Error downloading PDF:', error);

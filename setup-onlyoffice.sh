@@ -20,8 +20,8 @@ if ! command -v docker &> /dev/null; then
 fi
 echo "✓ Docker đã cài đặt"
 
-# 2. Kiểm tra xem container đã chạy chưa
-EXISTING_CONTAINER=$(docker ps -a --filter "ancestor=onlyoffice/documentserver" --format "{{.Names}}" | head -1)
+# 2. Kiểm tra xem container đã chạy chưa (Developer Edition)
+EXISTING_CONTAINER=$(docker ps -a --filter "ancestor=onlyoffice/documentserver-de" --format "{{.Names}}" | head -1)
 
 if [ -n "$EXISTING_CONTAINER" ]; then
     echo "⚠️  Container '$EXISTING_CONTAINER' đã tồn tại"
@@ -36,19 +36,29 @@ if [ -n "$EXISTING_CONTAINER" ]; then
     fi
 fi
 
-# 3. Tạo container mới nếu chưa có
+# 3. Tạo container mới nếu chưa có (Developer Edition)
 if [ -z "$CONTAINER_NAME" ]; then
     echo ""
-    echo "📦 Đang tạo ONLYOFFICE Document Server container..."
-    CONTAINER_NAME="onlyoffice-documentserver"
+    echo "📦 Đang tạo ONLYOFFICE Document Server Developer Edition container..."
+    CONTAINER_NAME="onlyoffice-documentserver-de"
+    
+    # Tạo thư mục cho license nếu chưa có
+    LICENSE_DIR="./onlyoffice-license"
+    if [ ! -d "$LICENSE_DIR" ]; then
+        mkdir -p "$LICENSE_DIR"
+        echo "ℹ️  Thư mục license đã được tạo: $LICENSE_DIR"
+        echo "   Nếu có file license.lic, đặt vào thư mục này"
+    fi
     
     docker run -d \
         --name $CONTAINER_NAME \
         -p 8080:80 \
         -e JWT_ENABLED=false \
-        onlyoffice/documentserver
+        -v "$(pwd)/$LICENSE_DIR:/var/www/onlyoffice/Data" \
+        onlyoffice/documentserver-de
     
-    echo "✓ Container '$CONTAINER_NAME' đã được tạo"
+    echo "✓ Container '$CONTAINER_NAME' (Developer Edition) đã được tạo"
+    echo "ℹ️  Developer Edition có đầy đủ API như createConnector().executeMethod()"
 fi
 
 # 4. Đợi container khởi động
