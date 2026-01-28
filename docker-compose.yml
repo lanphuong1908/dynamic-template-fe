@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "80:80"
+    depends_on:
+      - onlyoffice
+      - json-server
+      - file-server
+
+  onlyoffice:
+    image: onlyoffice/documentserver-de
+    environment:
+      - JWT_ENABLED=false
+      - JWT_SECRET=secret
+      - JWT_HEADER=Authorization
+    ports:
+      - "8080:80"
+    volumes:
+      - ./onlyoffice-license:/var/www/onlyoffice/Data
+      - onlyoffice_data:/var/lib/onlyoffice
+      - onlyoffice_log:/var/log/onlyoffice
+
+  json-server:
+    image: node:18-alpine
+    working_dir: /app
+    volumes:
+      - ./db.json:/app/db.json
+      - ./routes.json:/app/routes.json
+    command: npx -y json-server@0.17.4 --watch db.json --routes routes.json --port 3001 --host 0.0.0.0
+    ports:
+      - "3001:3001"
+
+  file-server:
+    image: node:18-alpine
+    working_dir: /app
+    volumes:
+      - ./s3-demo/docs:/app/docs
+    command: npx http-server ./docs -p 3000 --cors
+    ports:
+      - "3000:3000"
+
+volumes:
+  onlyoffice_data:
+  onlyoffice_log:

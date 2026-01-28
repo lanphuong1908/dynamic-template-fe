@@ -236,7 +236,21 @@ export class DocxEditorComponent implements OnInit {
           autosave: false,
           hideRightMenu: false,
           toolbarNoTabs: false,
-          hideDownload: false // Đảm bảo nút download hiển thị
+          hideDownload: false, // Đảm bảo nút download hiển thị
+          customer: {
+            address: 'Hanoi, Vietnam',
+            info: 'MSB - Maritime Bank',
+            logo: 'http://localhost:3000/logo.png?v=' + new Date().getTime(),
+            mail: 'contact@msb.com.vn',
+            name: 'MSB Editor',
+            www: 'www.msb.com.vn'
+          },
+          logo: {
+            image: "http://localhost:3000/logo.png?v=" + new Date().getTime(),
+            imageEmbedded: "http://localhost:3000/logo.png?v=" + new Date().getTime(),
+            url: "https://www.msb.com.vn"
+          },
+          uiTheme: 'theme-classic-light', // Set theme to light
         }
         // Loại bỏ plugins config vì URL không hợp lệ
       },
